@@ -1,0 +1,217 @@
+/**
+ * Core Philosophy: This ruleset enforces a strict user-ownership model. All data is either
+ * stored in a user-specific private data tree or in top-level collections where document
+ * access is governed by an ownership field (e.g., a 'userId'). This approach ensures that
+ * users can only ever access their own information, preventing data leaks between users.
+ *
+ * Data Structure: The primary data structure is hierarchical, starting with a top-level
+ * /users collection. Each user's private data, such as 'affirmations' and 'moodEntries',
+ * is stored in subcollections under their own user document (/users/{userId}/...).
+ * This path-based ownership is simple, performant, and highly secure. Other collections
+ * like 'subscriptions' and 'settings' are at the top level to be managed by backend
+ * services, but are still secured by a denormalized 'userId' field on each document.
+ *
+ * Key Security Decisions:
+ * - Default Deny: All paths are closed by default. Access is granted explicitly.
+ * - User Isolation: Users are strictly isolated. It is impossible for one user to read,
+ *   write, or even list the data of another user.
+ * - No User Listing: The top-level `/users` collection cannot be listed by any client to
+ *   prevent user enumeration attacks.
+ * - Admin Roles: Admin privileges are managed through the existence of a document in the
+ *   `/roles_admin` collection. This collection is not readable or writable by any client,
+ *   preventing privilege escalation. Admin checks must happen via helper functions.
+ *
+ * Denormalization for Authorization: To ensure fast and secure rules, authorization data
+ * is denormalized. For example, instead of using a slow `get()` call to check a user's
+ * subscription status, a `userId` is expected to be stored directly on the subscription
+ * document itself. This makes rules simpler and more reliable.
+ *
+ * Structural Segregation: User-private data (affirmations, mood entries) is kept in
+ * subcollections under `/users/{userId}`, which is a structurally distinct and secure
+ * location from other top-level data.
+ */
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --------------------------------------------------------------------------------
+    // Helper Functions
+    // --------------------------------------------------------------------------------
+
+    /**
+     * Checks if the user is authenticated.
+     */
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    /**
+     * Checks if the authenticated user's UID matches the provided userId.
+     * This is the foundation of the user-ownership model.
+     * @param userId The UID to check against the authenticated user.
+     */
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    /**
+     * Verifies that a document already exists before an operation.
+     * Crucial for secure update and delete operations.
+     */
+    function isExistingDoc() {
+      return resource != null;
+    }
+
+    /**
+     * A convenience function that combines an ownership check with an
+     * existence check. Used for all state-changing operations on existing data.
+     * @param userId The UID of the document owner.
+     */
+    function isExistingOwner(userId) {
+      return isOwner(userId) && isExistingDoc();
+    }
+
+    /**
+     * Validates the data for a new user document during creation.
+     * Ensures the document ID in the path is consistent with the `uid` field in the data.
+     * @param userId The user's UID from the document path.
+     */
+    function isNewUserValid(userId) {
+      let data = request.resource.data;
+      return data.uid == userId &&
+             data.username is string &&
+             data.email is string &&
+             data.isUpgraded == false &&
+             data.createdAt == request.time;
+    }
+
+    /**
+     * Validates that immutable fields are not part of an update request.
+     * Prevents a user from changing their UID, email, or creation date after the account is created.
+     */
+    function isUserDataImmutable() {
+      // The incoming data for an update should not contain any of the immutable fields.
+      // This prevents a user from trying to change their own UID, email, or creation timestamp.
+      return !('uid' in request.resource.data) &&
+             !('email' in request.resource.data) &&
+             !('createdAt' in request.resource.data);
+    }
+
+    /**
+     * Validates data for a new document in a user's private subcollection.
+     * Ensures that the new document is correctly linked back to its owner via the 'userId' field.
+     * @param userId The user's UID from the document path.
+     */
+    function isSubcollectionDocValid(userId) {
+      return request.resource.data.userId == userId;
+    }
+
+    /**
+     * Validates that the ownership link ('userId' field) on a subcollection document cannot be changed.
+     * Prevents a user's private data from being moved or reassigned to another user.
+     */
+    function isSubcollectionDataImmutable() {
+      return request.resource.data.userId == resource.data.userId;
+    }
+
+    // --------------------------------------------------------------------------------
+    // Collection Rules
+    // --------------------------------------------------------------------------------
+
+    /**
+     * @description Controls access to user profile documents.
+     * @path /users/{userId}
+     * @allow (create) An authenticated user can create their own user document if the data is valid.
+     * @allow (update) A user can update their own document, but cannot change immutable fields.
+     * @deny (list) No user can list all user documents in the collection.
+     * @principle Restricts access to a user's own data tree and allows self-creation of a profile.
+     */
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && isNewUserValid(userId);
+      allow update: if isOwner(userId) && isUserDataImmutable();
+      allow delete: if isExistingOwner(userId);
+    }
+
+    /**
+     * @description Controls access to a user's private daily affirmations.
+     * @path /users/{userId}/affirmations/{affirmationId}
+     * @allow (get, list, create, update, delete) An authenticated user can fully manage their own affirmations.
+     * @deny (get) Another user trying to read an affirmation.
+     * @principle Enforces strict ownership for a user's private subcollection data.
+     */
+    match /users/{userId}/affirmations/{affirmationId} {
+      allow get: if isOwner(userId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isSubcollectionDocValid(userId);
+      allow update: if isExistingOwner(userId) && isSubcollectionDataImmutable();
+      allow delete: if isExistingOwner(userId);
+    }
+
+    /**
+     * @description Controls access to a user's private mood and journal entries.
+     * @path /users/{userId}/moodEntries/{moodEntryId}
+     * @allow (get, list, create, update, delete) An authenticated user can fully manage their own mood entries.
+     * @deny (list) Another user trying to list mood entries.
+     * @principle Enforces strict ownership for a user's private subcollection data.
+     */
+    match /users/{userId}/moodEntries/{moodEntryId} {
+      allow get: if isOwner(userId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isSubcollectionDocValid(userId);
+      allow update: if isExistingOwner(userId) && isSubcollectionDataImmutable();
+      allow delete: if isExistingOwner(userId);
+    }
+
+    /**
+     * @description Controls access to subscription documents.
+     * @path /subscriptions/{subscriptionId}
+     * @allow (read/write) - NONE. The rules are disabled pending a schema update.
+     * @deny (create) Any user trying to create a subscription document.
+     * @principle Placeholder rule due to missing authorization field. Waits for schema fix.
+     */
+    match /subscriptions/{subscriptionId} {
+      // CRITICAL: Cannot implement owner-only rules. The 'Subscription' entity schema is missing a 'userId' field.
+      // This field is required to securely associate a subscription with a user and grant access.
+      allow get: if false; // TODO: Add owner validation (e.g., isOwner(resource.data.userId)) once the schema is updated.
+      allow list: if false;
+      allow create: if false; // TODO: Add owner validation (e.g., isOwner(request.resource.data.userId)) once the schema is updated.
+      allow update: if false; // TODO: Add owner validation (e.g., isExistingOwner(resource.data.userId)) once the schema is updated.
+      allow delete: if false; // TODO: Add owner validation (e.g., isExistingOwner(resource.data.userId)) once the schema is updated.
+    }
+
+    /**
+     * @description Controls access to user-specific settings documents.
+     * @path /settings/{settingsId}
+     * @allow (read/write) - NONE. The rules are disabled pending a schema update.
+     * @deny (update) Any user trying to update a settings document.
+     * @principle Placeholder rule due to missing authorization field. Waits for schema fix.
+     */
+    match /settings/{settingsId} {
+      // CRITICAL: Cannot implement owner-only rules. The 'Settings' entity schema is missing a 'userId' field.
+      // This field is required to securely associate settings with a user and grant access.
+      allow get: if false; // TODO: Add owner validation (e.g., isOwner(resource.data.userId)) once the schema is updated.
+      allow list: if false;
+      allow create: if false; // TODO: Add owner validation (e.g., isOwner(request.resource.data.userId)) once the schema is updated.
+      allow update: if false; // TODO: Add owner validation (e.g., isExistingOwner(resource.data.userId)) once the schema is updated.
+      allow delete: if false; // TODO: Add owner validation (e.g., isExistingOwner(resource.data.userId)) once the schema is updated.
+    }
+
+    /**
+     * @description Secures the admin role collection.
+     * @path /roles_admin/{userId}
+     * @allow (read/write) - NONE. This collection must only be managed by a trusted backend service.
+     * @deny (get, list, create, update, delete) All client-side access is denied to prevent users from discovering who admins are or attempting to grant themselves admin rights.
+     * @principle Prevents privilege escalation and enumeration of privileged users.
+     */
+    match /roles_admin/{userId} {
+      allow get: if false;
+      allow list: if false;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+  }
+}

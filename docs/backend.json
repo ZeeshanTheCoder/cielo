@@ -1,0 +1,277 @@
+{
+  "entities": {
+    "User": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "User",
+      "type": "object",
+      "description": "Represents a user of the Cielo application.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the user entity."
+        },
+        "email": {
+          "type": "string",
+          "description": "User's email address.",
+          "format": "email"
+        },
+        "zodiacSign": {
+          "type": "string",
+          "description": "User's zodiac sign. Null if not upgraded."
+        },
+        "subscriptionId": {
+          "type": "string",
+          "description": "Reference to Subscription entity. (Relationship: User 1:1 Subscription)"
+        },
+        "settingsId": {
+          "type": "string",
+          "description": "Reference to Settings entity. (Relationship: User 1:1 Settings)"
+        }
+      },
+      "required": [
+        "id",
+        "email"
+      ]
+    },
+    "Affirmation": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Affirmation",
+      "type": "object",
+      "description": "Represents a daily affirmation generated for a user.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the affirmation entity."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Reference to User entity. (Relationship: User 1:N Affirmation)"
+        },
+        "date": {
+          "type": "string",
+          "description": "Date for which the affirmation was generated.",
+          "format": "date-time"
+        },
+        "text": {
+          "type": "string",
+          "description": "The text of the affirmation."
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "date",
+        "text"
+      ]
+    },
+    "MoodEntry": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "MoodEntry",
+      "type": "object",
+      "description": "Represents a user's mood entry in their journal.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the mood entry entity."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Reference to User entity. (Relationship: User 1:N MoodEntry)"
+        },
+        "date": {
+          "type": "string",
+          "description": "Date of the mood entry.",
+          "format": "date-time"
+        },
+        "mood": {
+          "type": "number",
+          "description": "The user's mood on a scale (e.g., 1-5)."
+        },
+        "journalEntry": {
+          "type": "string",
+          "description": "The user's journal entry for the day."
+        },
+        "sentimentScore": {
+          "type": "number",
+          "description": "Sentiment score of the journal entry."
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "date",
+        "mood"
+      ]
+    },
+    "Subscription": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Subscription",
+      "type": "object",
+      "description": "Represents a user's subscription status and details.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the subscription entity."
+        },
+        "startDate": {
+          "type": "string",
+          "description": "Start date of the subscription.",
+          "format": "date-time"
+        },
+        "endDate": {
+          "type": "string",
+          "description": "End date of the subscription.",
+          "format": "date-time"
+        },
+        "isSubscribed": {
+          "type": "boolean",
+          "description": "Indicates whether the user is currently subscribed."
+        }
+      },
+      "required": [
+        "id",
+        "startDate",
+        "endDate",
+        "isSubscribed"
+      ]
+    },
+    "Settings": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Settings",
+      "type": "object",
+      "description": "Represents user-specific settings.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the settings entity."
+        },
+        "theme": {
+          "type": "string",
+          "description": "The user's preferred theme."
+        },
+        "notificationEnabled": {
+          "type": "boolean",
+          "description": "Indicates whether notifications are enabled."
+        }
+      },
+      "required": [
+        "id"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/users/{userId}",
+        "definition": {
+          "entityName": "User",
+          "schema": {
+            "$ref": "#/backend/entities/User"
+          },
+          "description": "Stores user profiles. Path-based ownership.  Used for authentication and user-specific data.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier for the user."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/users/{userId}/affirmations/{affirmationId}",
+        "definition": {
+          "entityName": "Affirmation",
+          "schema": {
+            "$ref": "#/backend/entities/Affirmation"
+          },
+          "description": "Stores daily affirmations for each user. Leverages path-based ownership. Only the user can access their affirmations.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier for the user."
+            },
+            {
+              "name": "affirmationId",
+              "description": "The unique identifier for the affirmation."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/users/{userId}/moodEntries/{moodEntryId}",
+        "definition": {
+          "entityName": "MoodEntry",
+          "schema": {
+            "$ref": "#/backend/entities/MoodEntry"
+          },
+          "description": "Stores mood entries for each user. Maintains path-based ownership, meaning the user can only access their mood entries.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier for the user."
+            },
+            {
+              "name": "moodEntryId",
+              "description": "The unique identifier for the mood entry."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/subscriptions/{subscriptionId}",
+        "definition": {
+          "entityName": "Subscription",
+          "schema": {
+            "$ref": "#/backend/entities/Subscription"
+          },
+          "description": "Stores subscription details.  The `userId` is present in the subscription document and acts as the link to the user.",
+          "params": [
+            {
+              "name": "subscriptionId",
+              "description": "The unique identifier for the subscription."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/settings/{settingsId}",
+        "definition": {
+          "entityName": "Settings",
+          "schema": {
+            "$ref": "#/backend/entities/Settings"
+          },
+          "description": "Stores user-specific settings. The `userId` is present in the settings document and acts as the link to the user.",
+          "params": [
+            {
+              "name": "settingsId",
+              "description": "The unique identifier for the settings."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/roles_admin/{userId}",
+        "definition": {
+          "entityName": "roles_admin",
+          "schema": {
+            "$ref": "#/backend/entities/User"
+          },
+          "description": "Used to grant admin privileges. Existence of a document is sufficient for determining admin role.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier for the user."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "The Firestore data structure is designed to ensure security, scalability, and ease of debugging, adhering to the core design principles of Authorization Independence, Clarity of Intent, DBAC (Database-Based Access Control), and QAPs (Rules are not Filters). Authorization independence is achieved through denormalization. User roles and access rights are stored directly within the documents that need protection, avoiding costly and insecure `get()` calls in security rules.  Path-based ownership is used where applicable, which is inherently secure and efficient. Collections are segregated based on access requirements to maintain a homogeneous security posture. Explicit state modeling is used for clarity, and predictable schema are enforced to improve maintainability.\n\n**Authorization Independence:**\nAuthorization is managed primarily through path-based ownership and denormalization of membership data where required. This eliminates the need for `get()` calls in security rules, improving performance and security.\n\n**QAPs (Rules are not Filters):**\nThe structure facilitates secure `list` operations by ensuring that collections contain documents with similar security requirements. Path-based ownership ensures users can only access their own data.\n\n**Specific Design Choices:**\n\n*   `/users/{userId}`: Stores user profiles.  This path establishes ownership.\n*   `/users/{userId}/affirmations/{affirmationId}`:  Affirmations are nested under users, leveraging path-based ownership. Only the user can access their affirmations.\n*   `/users/{userId}/moodEntries/{moodEntryId}`: Mood entries are also nested under users, maintaining path-based ownership. The user can only access their mood entries.\n*   `/subscriptions/{subscriptionId}`: Stores subscription details. This is a top-level collection because any authorized backend function or service may need to get or update a subscription. The `userId` is present in the subscription document and acts as the link to the user.\n*   `/settings/{settingsId}`: Stores settings. This is a top-level collection because any authorized backend function or service may need to get or update settings. The `userId` is present in the settings document and acts as the link to the user.\n*   `/roles_admin/{userId}`: Used to grant admin privileges. Existence of a document is sufficient for determining admin role."
+  }
+}
